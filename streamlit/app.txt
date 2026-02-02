@@ -1,0 +1,114 @@
+import streamlit as st
+from pymongo import MongoClient
+import pandas as pd
+import datetime
+
+MONGO_URI = "mongodb://mongo:27017"
+DB_NAME = "bda_project"
+REFRESH_SECONDS = 30
+
+st.set_page_config(
+    page_title="Real-Time Payments Analytics",
+    layout="wide"
+)
+
+st.title("💳 Real-Time Payments Intelligence Dashboard")
+st.caption("Powered by Spark + MongoDB + Hadoop + Airflow + Streamlit")
+
+@st.cache_resource
+def get_client():
+    return MongoClient(MONGO_URI)
+
+client = get_client()
+db = client[DB_NAME]
+
+def fetch_table(name):
+    return list(db[name].find({}))
+
+def get_df(col):
+    data = fetch_table(col)
+    if not data:
+        return pd.DataFrame()
+    df = pd.DataFrame(data)
+    if "txn_date" in df:
+        df["txn_date"] = pd.to_datetime(df["txn_date"])
+    return df
+
+placeholder = st.empty()
+
+while True:
+    with placeholder.container():
+
+        # -------- GLOBAL KPIs --------
+        global_kpi = db.kpis_global.find_one(sort=[("_id", -1)])
+
+        if not global_kpi:
+            st.warning("No KPI data found. Run Spark KPI job.")
+        else:
+            c1, c2, c3, c4 = st.columns(4)
+
+            c1.metric("Total Transactions",
+                      f"{int(global_kpi['total_transactions']):,}")
+
+            c2.metric("Total Revenue",
+                      f"{global_kpi['total_volume']:,.2f}")
+
+            c3.metric("Average Ticket Size",
+                      f"{global_kpi['avg_transaction_value']:.2f}")
+
+            # REAL-TIME KPI (last 60 seconds)
+            c4.metric(
+                "Live Transactions (Last 60s)",
+                f"{db.transactions_fact.count_documents({
+                    'transaction_timestamp': {
+                        '$gte': datetime.datetime.utcnow() - datetime.timedelta(seconds=60)
+                    }
+                }):,}"
+            )
+
+        st.markdown("---")
+
+        # -------- TREND --------
+        daily_df = get_df("kpis_daily")
+
+        if not daily_df.empty:
+            left, right = st.columns(2)
+
+            with left:
+                st.subheader("📈 Daily Transactions Trend")
+                st.line_chart(daily_df.set_index("txn_date")["transactions"])
+
+            with right:
+                st.subheader("💰 Daily Revenue Trend")
+                st.line_chart(daily_df.set_index("txn_date")["total_volume"])
+
+        st.markdown("---")
+
+        # -------- MERCHANT CATEGORY --------
+        merchant_df = get_df("kpis_by_merchant_category")
+        method_df = get_df("kpis_by_payment_method")
+        segment_df = get_df("kpis_by_customer_segment")
+
+        c1, c2, c3 = st.columns(3)
+
+        if not merchant_df.empty:
+            c1.subheader("🏪 Revenue by Merchant Category")
+            c1.bar_chart(
+                merchant_df.set_index("business_category")["total_revenue"]
+            )
+
+        if not method_df.empty:
+            c2.subheader("💳 Revenue by Payment Method")
+            c2.bar_chart(
+                method_df.set_index("method_type")["total_revenue"]
+            )
+
+        if not segment_df.empty:
+            c3.subheader("🧍 Customer Segment Performance")
+            c3.bar_chart(
+                segment_df.set_index("customer_segment")["total_revenue"]
+            )
+
+        st.info(f"Dashboard auto-refreshing every {REFRESH_SECONDS} seconds")
+
+    st.experimental_rerun()

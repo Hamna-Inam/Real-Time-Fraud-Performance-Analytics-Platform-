@@ -1,0 +1,124 @@
+version: "3.9"
+
+services:
+  mongo:
+    image: mongo:4.4
+    container_name: mongo
+    ports:
+      - "27017:27017"
+    mem_limit: 512m
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7
+    container_name: redis-cache
+    ports:
+      - "6379:6379"
+
+
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    environment:
+      - CLUSTER_NAME=test
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+      - HDFS_CONF_dfs_permissions_enabled=false
+    ports:
+      - "9870:9870"
+      - "8020:8020"
+    mem_limit: 1g
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+      - HDFS_CONF_dfs_permissions_enabled=false
+    depends_on:
+      - namenode
+    ports:
+      - "9864:9864"
+    mem_limit: 1g
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+
+  spark-master:
+    image: bde2020/spark-master:3.2.1-hadoop3.2
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+    volumes:
+      - ./scripts:/opt/spark/scripts
+      - ./jars:/opt/spark/jars
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+    depends_on:
+      - namenode
+
+  spark-worker:
+    image: bde2020/spark-worker:3.2.1-hadoop3.2
+    container_name: spark-worker
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER=spark://spark-master:7077
+    depends_on:
+      - spark-master
+
+  airflow:
+    build: .
+    container_name: airflow
+    command: airflow standalone
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    ports:
+      - "8081:8080"
+    mem_limit: 2g
+    depends_on:
+      - mongo
+      - spark-master
+      - spark-worker
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./scripts:/opt/airflow/scripts
+      - ./jars:/opt/airflow/jars
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  data-generator:
+    image: python:3.10-slim
+    container_name: data-generator
+    depends_on:
+      - mongo
+    mem_limit: 2g
+    volumes:
+      - ./scripts:/scripts
+    command: >
+      bash -c "
+      pip install --no-cache-dir torch==2.2.2+cpu --index-url https://download.pytorch.org/whl/cpu &&
+      pip install --no-cache-dir sdv==1.10.0 faker pymongo pandas &&
+      python /scripts/setup_dimensions.py &&
+      python /scripts/ai_generator.py &&
+      tail -f /dev/null
+      "
+
+  streamlit:
+    build: ./streamlit
+    container_name: streamlit-dashboard
+    depends_on:
+      - mongo
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./streamlit/app.py:/app/app.py
+
+
+volumes:
+  mongo_data:
+  hadoop_namenode:
+  hadoop_datanode:
