@@ -23,10 +23,7 @@ This project implements a **streaming architecture** to deliver immediate insigh
 
 ## 🏗️ System Architecture (High Level)
 
-```
-<img width="404" height="660" alt="image" src="https://github.com/user-attachments/assets/dd67f40d-465e-4b0d-a704-42d2d882d00a" />
-
-```
+![PHOTO-2025-12-25-16-05-10](https://github.com/user-attachments/assets/52e5b93e-7c0f-46f9-89b6-9f1cee86e72c)
 
 ---
 
